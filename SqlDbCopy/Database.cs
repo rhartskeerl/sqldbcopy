@@ -11,7 +11,7 @@ namespace SqlDbCopy
 {
     class Database
     {
-        const string SYS_TABLES = "SELECT name FROM sys.tables";
+        const string SYS_TABLES = "select '[' + s.name + '].[' + t.name + ']' from sys.tables t inner join sys.schemas s on t.schema_id = s.schema_id";
         public Database() { }
 
         public Database(string source, string destination)
@@ -34,6 +34,7 @@ namespace SqlDbCopy
 
         public void Copy()
         {
+            TruncateSource();
             foreach(string t in Tables)
             {
                 CopyTableAsync(t).Wait();
@@ -42,44 +43,55 @@ namespace SqlDbCopy
 
         public async Task CopyAsync()
         {
+            TruncateSource();
             await Task.WhenAll(Tables.Select(async t => await CopyTableAsync(t)));
         }
 
         private async Task CopyTableAsync(string table)
         {
-            SqlConnection connectionSource = new SqlConnection(Source);
-            try
+            if(!String.IsNullOrEmpty(table))
             {
-                connectionSource.Open();
-                Stopwatch stopwatch = Stopwatch.StartNew();
-                Log.Write(String.Format("Starting copy of {0}.", table));
-
-                TruncateSource(table);
-                SqlCommand source = new SqlCommand("SELECT * FROM [" + table + "];", connectionSource);
-
-                SqlBulkCopy bulkCopy = new SqlBulkCopy(Destination, SqlBulkCopyOptions.KeepIdentity | SqlBulkCopyOptions.TableLock)
+                SqlConnection connectionSource = new SqlConnection(Source);
+                try
                 {
-                    DestinationTableName = table,
-                    EnableStreaming = true,
-                    BatchSize = 100000
-                };
-                SqlDataReader reader = source.ExecuteReader();
-                await bulkCopy.WriteToServerAsync(reader);
-                reader.Close();
-                connectionSource.Close();
-                stopwatch.Stop();
-                Log.Write(string.Format("Finished copying {0} in {1}ms", table, stopwatch.ElapsedMilliseconds));
+                    connectionSource.Open();
+                    Stopwatch stopwatch = Stopwatch.StartNew();
+                    Log.Write(String.Format("Starting copy of {0}.", table));
+
+                    SqlCommand source = new SqlCommand("SELECT * FROM " + table, connectionSource);
+
+                    SqlBulkCopy bulkCopy = new SqlBulkCopy(Destination, SqlBulkCopyOptions.KeepIdentity | SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.KeepNulls)
+                    {
+                        DestinationTableName = table,
+                        EnableStreaming = true,
+                        BatchSize = 100000
+                    };
+                    SqlDataReader reader = source.ExecuteReader();
+                    await bulkCopy.WriteToServerAsync(reader);
+                    reader.Close();
+                    connectionSource.Close();
+                    stopwatch.Stop();
+                    Log.Write(string.Format("Finished copying {0} in {1}ms", table, stopwatch.ElapsedMilliseconds));
+                }
+                catch (Exception ex)
+                {
+                    Log.Write(ex.Message);
+                }
             }
-            catch(Exception ex)
-            {
-                Log.Write(ex.Message);
-            }
+
         }
-        private void TruncateSource(string table)
+        private void TruncateSource()
         {
+            StringBuilder sb = new StringBuilder();
+            foreach(string t in Tables)
+            {
+                if(!String.IsNullOrEmpty(t))
+                    sb.AppendLine("TRUNCATE TABLE " + t);
+            }
+
             using (SqlConnection connection = new SqlConnection(Destination))
             {
-                using (SqlCommand command = new SqlCommand("TRUNCATE TABLE [" + table + "]", connection))
+                using (SqlCommand command = new SqlCommand(sb.ToString(), connection))
                 {
                     connection.Open();
                     command.ExecuteNonQuery();

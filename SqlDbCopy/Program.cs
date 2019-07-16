@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -30,6 +31,12 @@ namespace SqlDbCopy
             if(args[2] == "*")
             {
                 database.GetTablesFromSource();
+            } else if (args[2].Contains('*'))
+            {
+                database.GetTablesFromSource(args[2]);
+            } else if (args[2].ToLowerInvariant().EndsWith(".txt"))
+            {
+                database.Tables = File.ReadAllLines(args[2]);
             }
 
             Stopwatch s = Stopwatch.StartNew();
