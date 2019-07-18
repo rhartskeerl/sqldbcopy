@@ -13,7 +13,7 @@ namespace SqlDbCopy
 {
     class Database
     {
-        const string SYS_TABLES = "select '[' + s.name + '].[' + t.name + ']' from sys.tables t inner join sys.schemas s on t.schema_id = s.schema_id";
+        const string SYS_TABLES = "select s.name + '.' + t.name from sys.tables t inner join sys.schemas s on t.schema_id = s.schema_id";
         public Database() { }
 
         public Database(string source, string destination)
@@ -34,20 +34,31 @@ namespace SqlDbCopy
         public Logger Log { get; set; }
         public string[] Tables { get; set; }
 
-        public async Task CopyAsync(int maxdop)
+        public void Copy(int maxdop)
         {
             if (Destination.Contains("Data Source"))
                 TruncateSource();
 
-            SemaphoreSlim dop = new SemaphoreSlim(maxdop);
-            await Task.WhenAll(Tables.Select(async t => await CopyTableAsync(t, dop)));
+            Thread[] threads = new Thread[Tables.Length];
+            int lastFinishedThread = 0;
+
+            for(int i = 0;i < Tables.Length;i++)
+            {
+                threads[i] = new Thread(CopyTable);
+                threads[i].Start(Tables[i]);
+            }
+            for(int i = 0;i<threads.Length;i++)
+            {
+                if(threads[i].ThreadState == System.Threading.ThreadState.Running)
+                    threads[i].Join();
+            }
         }
 
-        private async Task CopyTableAsync(string table, SemaphoreSlim dop)
+        private void CopyTable(object o)
         {
+            string table = (string)o;
             if(!String.IsNullOrEmpty(table))
             {
-                await dop.WaitAsync();
                 SqlConnection connectionSource = new SqlConnection(Source);
                 try
                 {
@@ -67,7 +78,7 @@ namespace SqlDbCopy
                             BatchSize = 100000
                         };
 
-                        await bulkCopy.WriteToServerAsync(reader);
+                        bulkCopy.WriteToServer(reader);
                     }
                     else
                     {
@@ -77,7 +88,7 @@ namespace SqlDbCopy
                         StreamWriter streamWriter = new StreamWriter(Destination + "\\" + table.Replace("[","").Replace("]","") + ".csv");
                         while(reader.Read())
                         {
-                            await streamWriter.WriteLineAsync(reader.ToCsv());
+                            streamWriter.WriteLine(reader.ToCsv());
                         }
                         streamWriter.Close();
                     }
@@ -90,10 +101,6 @@ namespace SqlDbCopy
                 {
                     Log.Write(ex.Message);
                 }
-                finally
-                {
-                    dop.Release();
-                }
             }
 
         }
@@ -102,6 +109,7 @@ namespace SqlDbCopy
             StringBuilder sb = new StringBuilder();
             foreach(string t in Tables)
             {
+                Log.Write("Truncating table " + t);
                 if(!String.IsNullOrEmpty(t))
                     sb.AppendLine("TRUNCATE TABLE " + t);
             }
@@ -142,11 +150,12 @@ namespace SqlDbCopy
             SqlDataReader reader = command.ExecuteReader(CommandBehavior.CloseConnection);
             while (reader.Read())
             {
-                tableList.Add(reader.GetString(0));
+                tableList.Add(reader.GetString(0).ToQuotedName());
             }
             reader.Close();
             source.Close();
             Tables = tableList.ToArray();
         }
+
     }
 }

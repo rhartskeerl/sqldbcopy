@@ -51,5 +51,17 @@ namespace SqlDbCopy
 
             return sb.ToString();
         }
+
+        public static string ToQuotedName(this string name)
+        {
+            string[] parts = name.Split('.');
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if(!string.IsNullOrEmpty(parts[i]))
+                    parts[i] = "[" + parts[i] + "]";
+            }
+            return String.Join(".", parts);
+        }
+
     }
 }

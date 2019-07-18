@@ -37,11 +37,16 @@ namespace SqlDbCopy
                 database.GetTablesFromSource(args[2]);
             } else if (args[2].ToLowerInvariant().EndsWith(".txt"))
             {
-                database.Tables = File.ReadAllLines(args[2]);
+                string[] tables = File.ReadAllLines(args[2]);
+                for(int i = 0; i<tables.Length;i++)
+                {
+                    tables[i] = tables[i].ToQuotedName();
+                }
+                database.Tables = tables;
             }
 
             Stopwatch s = Stopwatch.StartNew();
-            database.CopyAsync(maxdop).Wait();
+            database.Copy(maxdop);
 
             s.Stop();
             log.Write(String.Format("Finished in {0}ms.", s.ElapsedMilliseconds));
