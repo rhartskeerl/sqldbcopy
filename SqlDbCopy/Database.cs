@@ -8,12 +8,14 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using ThreadState = System.Threading.ThreadState;
 
 namespace SqlDbCopy
 {
     class Database
     {
-        const string SYS_TABLES = "select s.name + '.' + t.name from sys.tables t inner join sys.schemas s on t.schema_id = s.schema_id";
+        const string SYS_TABLES = "select s.name + '.' + t.name from sys.tables t inner join sys.schemas s on t.schema_id = s.schema_id order by s.name, t.name";
+        private int _currentThreadCount = 0;
         public Database() { }
 
         public Database(string source, string destination)
@@ -40,16 +42,21 @@ namespace SqlDbCopy
                 TruncateSource();
 
             Thread[] threads = new Thread[Tables.Length];
-            int lastFinishedThread = 0;
+            _currentThreadCount = 0;
 
             for(int i = 0;i < Tables.Length;i++)
             {
+                _currentThreadCount++;
                 threads[i] = new Thread(CopyTable);
                 threads[i].Start(Tables[i]);
+                while(_currentThreadCount == maxdop)
+                {
+                    Thread.Sleep(500);
+                }
             }
-            for(int i = 0;i<threads.Length;i++)
+            for (int i = 0; i < threads.Length;i++)
             {
-                if(threads[i].ThreadState == System.Threading.ThreadState.Running)
+                if (threads[i].ThreadState == ThreadState.Running)
                     threads[i].Join();
             }
         }
@@ -101,6 +108,10 @@ namespace SqlDbCopy
                 {
                     Log.Write(ex.Message);
                 }
+                finally
+                {
+                    _currentThreadCount--;
+                }
             }
 
         }
@@ -109,7 +120,6 @@ namespace SqlDbCopy
             StringBuilder sb = new StringBuilder();
             foreach(string t in Tables)
             {
-                Log.Write("Truncating table " + t);
                 if(!String.IsNullOrEmpty(t))
                     sb.AppendLine("TRUNCATE TABLE " + t);
             }

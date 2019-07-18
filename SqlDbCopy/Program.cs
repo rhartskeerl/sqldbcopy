@@ -13,7 +13,7 @@ namespace SqlDbCopy
         static void Main(string[] args)
         {
             Logger log = new Logger();
-            int maxdop = 1;
+            int maxdop = Environment.ProcessorCount * 2;
 
             if(args.Length < 3)
             {
@@ -24,9 +24,10 @@ namespace SqlDbCopy
             {
                 Int32.TryParse(args[3], out maxdop);
                 if (maxdop < 1)
-                    maxdop = 1;
+                    maxdop = Environment.ProcessorCount * 2;
             }
 
+            log.Write(String.Format("Starting database copy with {0} thread(s).", maxdop));
             Database database = new Database(args[0], args[1], log);
             
             if(args[2] == "*")
