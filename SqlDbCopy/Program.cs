@@ -13,7 +13,7 @@ namespace SqlDbCopy
         static void Main(string[] args)
         {
             Logger log = new Logger();
-            bool async = true;
+            int maxdop = 1;
 
             if(args.Length < 3)
             {
@@ -22,8 +22,9 @@ namespace SqlDbCopy
 
             if(args.Length == 4)
             {
-                if (args[3].ToLowerInvariant() == "true" || args[3] == "1")
-                    async = false;
+                Int32.TryParse(args[3], out maxdop);
+                if (maxdop < 1)
+                    maxdop = 1;
             }
 
             Database database = new Database(args[0], args[1], log);
@@ -40,10 +41,8 @@ namespace SqlDbCopy
             }
 
             Stopwatch s = Stopwatch.StartNew();
-            if (async)
-                database.CopyAsync().Wait();
-            else
-                database.Copy();
+            database.CopyAsync(maxdop).Wait();
+
             s.Stop();
             log.Write(String.Format("Finished in {0}ms.", s.ElapsedMilliseconds));
         }

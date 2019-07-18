@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SqlDbCopy
@@ -32,25 +34,20 @@ namespace SqlDbCopy
         public Logger Log { get; set; }
         public string[] Tables { get; set; }
 
-        public void Copy()
+        public async Task CopyAsync(int maxdop)
         {
-            TruncateSource();
-            foreach(string t in Tables)
-            {
-                CopyTableAsync(t).Wait();
-            }
+            if (Destination.Contains("Data Source"))
+                TruncateSource();
+
+            SemaphoreSlim dop = new SemaphoreSlim(maxdop);
+            await Task.WhenAll(Tables.Select(async t => await CopyTableAsync(t, dop)));
         }
 
-        public async Task CopyAsync()
-        {
-            TruncateSource();
-            await Task.WhenAll(Tables.Select(async t => await CopyTableAsync(t)));
-        }
-
-        private async Task CopyTableAsync(string table)
+        private async Task CopyTableAsync(string table, SemaphoreSlim dop)
         {
             if(!String.IsNullOrEmpty(table))
             {
+                await dop.WaitAsync();
                 SqlConnection connectionSource = new SqlConnection(Source);
                 try
                 {
@@ -59,15 +56,31 @@ namespace SqlDbCopy
                     Log.Write(String.Format("Starting copy of {0}.", table));
 
                     SqlCommand source = new SqlCommand("SELECT * FROM " + table, connectionSource);
-
-                    SqlBulkCopy bulkCopy = new SqlBulkCopy(Destination, SqlBulkCopyOptions.KeepIdentity | SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.KeepNulls)
-                    {
-                        DestinationTableName = table,
-                        EnableStreaming = true,
-                        BatchSize = 100000
-                    };
                     SqlDataReader reader = source.ExecuteReader();
-                    await bulkCopy.WriteToServerAsync(reader);
+
+                    if(Destination.Contains("Data Source"))
+                    {
+                        SqlBulkCopy bulkCopy = new SqlBulkCopy(Destination, SqlBulkCopyOptions.KeepIdentity | SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.KeepNulls)
+                        {
+                            DestinationTableName = table,
+                            EnableStreaming = true,
+                            BatchSize = 100000
+                        };
+
+                        await bulkCopy.WriteToServerAsync(reader);
+                    }
+                    else
+                    {
+                        if (!Directory.Exists(Destination + "\\"))
+                            Directory.CreateDirectory(Destination + "\\");
+
+                        StreamWriter streamWriter = new StreamWriter(Destination + "\\" + table.Replace("[","").Replace("]","") + ".csv");
+                        while(reader.Read())
+                        {
+                            await streamWriter.WriteLineAsync(reader.ToCsv());
+                        }
+                        streamWriter.Close();
+                    }
                     reader.Close();
                     connectionSource.Close();
                     stopwatch.Stop();
@@ -76,6 +89,10 @@ namespace SqlDbCopy
                 catch (Exception ex)
                 {
                     Log.Write(ex.Message);
+                }
+                finally
+                {
+                    dop.Release();
                 }
             }
 
