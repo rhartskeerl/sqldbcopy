@@ -77,7 +77,7 @@ namespace SqlDbCopy
                     SqlCommand source = new SqlCommand("SELECT * FROM " + table, connectionSource);
                     SqlDataReader reader = source.ExecuteReader();
 
-                    if(Destination.Contains("Data Source"))
+                    if(Destination.ToLowerInvariant().Contains("data source"))
                     {
                         SqlBulkCopy bulkCopy = new SqlBulkCopy(Destination, SqlBulkCopyOptions.KeepIdentity | SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.KeepNulls)
                         {
