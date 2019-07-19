@@ -66,6 +66,7 @@ namespace SqlDbCopy
             string table = (string)o;
             if(!String.IsNullOrEmpty(table))
             {
+                long rows = 0;
                 SqlConnection connectionSource = new SqlConnection(Source);
                 try
                 {
@@ -86,6 +87,7 @@ namespace SqlDbCopy
                         };
 
                         bulkCopy.WriteToServer(reader);
+                        rows = bulkCopy.RowsAffected();
                     }
                     else
                     {
@@ -96,13 +98,14 @@ namespace SqlDbCopy
                         while(reader.Read())
                         {
                             streamWriter.WriteLine(reader.ToCsv());
+                            rows++;
                         }
                         streamWriter.Close();
                     }
                     reader.Close();
                     connectionSource.Close();
                     stopwatch.Stop();
-                    Log.Write(string.Format("Finished copying {0} in {1}ms", table, stopwatch.ElapsedMilliseconds));
+                    Log.Write(string.Format("Finished copying {0} rows to {1} in {2}ms", rows, table, stopwatch.ElapsedMilliseconds));
                 }
                 catch (Exception ex)
                 {

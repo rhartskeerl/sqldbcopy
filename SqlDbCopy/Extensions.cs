@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -57,11 +58,25 @@ namespace SqlDbCopy
             string[] parts = name.Split('.');
             for (int i = 0; i < parts.Length; i++)
             {
-                if(!string.IsNullOrEmpty(parts[i]))
+                if (!string.IsNullOrEmpty(parts[i]))
                     parts[i] = "[" + parts[i] + "]";
             }
             return String.Join(".", parts);
         }
 
+    }
+}
+
+namespace System.Data.SqlClient
+{
+    public static class SqlBulkCopyExtension
+    {
+        const String _rowsCopiedFieldName = "_rowsCopied";
+        static FieldInfo _rowsCopiedField = null;
+        public static int RowsAffected(this SqlBulkCopy bulkCopy)
+        {
+            if (_rowsCopiedField == null) _rowsCopiedField = typeof(SqlBulkCopy).GetField(_rowsCopiedFieldName, BindingFlags.NonPublic | BindingFlags.GetField | BindingFlags.Instance);
+            return (int)_rowsCopiedField.GetValue(bulkCopy);
+        }
     }
 }
