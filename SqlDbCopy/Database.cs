@@ -1,9 +1,12 @@
-﻿using System;
+﻿using Microsoft.WindowsAzure.Storage;
+using Microsoft.WindowsAzure.Storage.Blob;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -44,17 +47,17 @@ namespace SqlDbCopy
             Thread[] threads = new Thread[Tables.Length];
             _currentThreadCount = 0;
 
-            for(int i = 0;i < Tables.Length;i++)
+            for (int i = 0; i < Tables.Length; i++)
             {
                 _currentThreadCount++;
                 threads[i] = new Thread(CopyTable);
                 threads[i].Start(Tables[i]);
-                while(_currentThreadCount == maxdop)
+                while (_currentThreadCount == maxdop)
                 {
                     Thread.Sleep(500);
                 }
             }
-            for (int i = 0; i < threads.Length;i++)
+            for (int i = 0; i < threads.Length; i++)
             {
                 if (threads[i].ThreadState == ThreadState.Running)
                     threads[i].Join();
@@ -64,7 +67,7 @@ namespace SqlDbCopy
         private void CopyTable(object o)
         {
             string table = (string)o;
-            if(!String.IsNullOrEmpty(table))
+            if (!String.IsNullOrEmpty(table))
             {
                 long rows = 0;
                 SqlConnection connectionSource = new SqlConnection(Source);
@@ -77,7 +80,7 @@ namespace SqlDbCopy
                     SqlCommand source = new SqlCommand("SELECT * FROM " + table, connectionSource);
                     SqlDataReader reader = source.ExecuteReader();
 
-                    if(Destination.ToLowerInvariant().Contains("data source"))
+                    if (Destination.ToLowerInvariant().Contains("data source"))
                     {
                         SqlBulkCopy bulkCopy = new SqlBulkCopy(Destination, SqlBulkCopyOptions.KeepIdentity | SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.KeepNulls)
                         {
@@ -89,18 +92,30 @@ namespace SqlDbCopy
                         bulkCopy.WriteToServer(reader);
                         rows = bulkCopy.RowsAffected();
                     }
+                    else if (Destination.ToLowerInvariant() == "null")
+                    {
+                        while (reader.Read())
+                        {
+                            rows++;
+                        }
+                    }
                     else
                     {
                         if (!Directory.Exists(Destination + "\\"))
                             Directory.CreateDirectory(Destination + "\\");
 
-                        StreamWriter streamWriter = new StreamWriter(Destination + "\\" + table.Replace("[","").Replace("]","") + ".csv");
-                        while(reader.Read())
+                        using (FileStream outFile = File.Create(Destination + "\\" + table.Replace("[", "").Replace("]", "") + ".gz"))
+                        using (GZipStream compress = new GZipStream(outFile, CompressionMode.Compress))
+                        using (StreamWriter streamWriter = new StreamWriter(compress))
                         {
-                            streamWriter.WriteLine(reader.ToCsv());
-                            rows++;
+                            while (reader.Read())
+                            {
+                                streamWriter.WriteLine(reader.ToCsv());
+                                rows++;
+                            }
+                            streamWriter.Close();
                         }
-                        streamWriter.Close();
+
                     }
                     reader.Close();
                     connectionSource.Close();
@@ -121,9 +136,9 @@ namespace SqlDbCopy
         private void TruncateSource()
         {
             StringBuilder sb = new StringBuilder();
-            foreach(string t in Tables)
+            foreach (string t in Tables)
             {
-                if(!String.IsNullOrEmpty(t))
+                if (!String.IsNullOrEmpty(t))
                     sb.AppendLine("TRUNCATE TABLE " + t);
             }
 
@@ -151,7 +166,7 @@ namespace SqlDbCopy
         {
             string sql = SYS_TABLES;
 
-            if(!String.IsNullOrEmpty(filter))
+            if (!String.IsNullOrEmpty(filter))
             {
                 sql = SYS_TABLES + " LIKE '" + filter.Replace('*', '%') + "'";
             }

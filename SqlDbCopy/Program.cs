@@ -12,6 +12,7 @@ namespace SqlDbCopy
     {
         static void Main(string[] args)
         {
+            Console.WriteLine("The current GC Server mode is: " + System.Runtime.GCSettings.IsServerGC);
             Logger log = new Logger();
             int maxdop = Environment.ProcessorCount * 2;
 
