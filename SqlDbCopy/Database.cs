@@ -17,7 +17,7 @@ namespace SqlDbCopy
 {
     class Database
     {
-        const string SYS_TABLES = "select s.name + '.' + t.name from sys.tables t inner join sys.schemas s on t.schema_id = s.schema_id order by s.name, t.name";
+        public string Query { get; set; }  = "select s.name + '.' + t.name, 'select * from ' + s.name + '.' + t.name  from sys.tables t inner join sys.schemas s on t.schema_id = s.schema_id order by s.name, t.name";
         private int _currentThreadCount = 0;
         public Database() { }
 
@@ -37,17 +37,17 @@ namespace SqlDbCopy
         public string Destination { get; set; }
 
         public Logger Log { get; set; }
-        public string[] Tables { get; set; }
+        public List<Table> Tables { get; set; }
 
         public void Copy(int maxdop)
         {
-            if (Destination.Contains("Data Source"))
+            if (Destination.ToLowerInvariant().Contains("data source") || Destination.ToLowerInvariant().Contains("server"))
                 TruncateSource();
 
-            Thread[] threads = new Thread[Tables.Length];
+            Thread[] threads = new Thread[Tables.Count];
             _currentThreadCount = 0;
 
-            for (int i = 0; i < Tables.Length; i++)
+            for (int i = 0; i < Tables.Count; i++)
             {
                 _currentThreadCount++;
                 threads[i] = new Thread(CopyTable);
@@ -66,8 +66,8 @@ namespace SqlDbCopy
 
         private void CopyTable(object o)
         {
-            string table = (string)o;
-            if (!String.IsNullOrEmpty(table))
+            Table table = (Table)o;
+            if (!String.IsNullOrEmpty(table.Name))
             {
                 long rows = 0;
                 SqlConnection connectionSource = new SqlConnection(Source);
@@ -75,18 +75,20 @@ namespace SqlDbCopy
                 {
                     connectionSource.Open();
                     Stopwatch stopwatch = Stopwatch.StartNew();
-                    Log.Write(String.Format("Starting copy of {0}.", table));
+                    Log.Write(String.Format("Starting copy of {0}.", table.Name));
 
-                    SqlCommand source = new SqlCommand("SELECT * FROM " + table, connectionSource);
+                    SqlCommand source = new SqlCommand(table.Query, connectionSource);
+                    source.CommandTimeout = 0;
                     SqlDataReader reader = source.ExecuteReader();
 
-                    if (Destination.ToLowerInvariant().Contains("data source"))
+                    if (Destination.ToLowerInvariant().Contains("data source") || Destination.ToLowerInvariant().Contains("server"))
                     {
                         SqlBulkCopy bulkCopy = new SqlBulkCopy(Destination, SqlBulkCopyOptions.KeepIdentity | SqlBulkCopyOptions.TableLock | SqlBulkCopyOptions.KeepNulls)
                         {
-                            DestinationTableName = table,
+                            DestinationTableName = table.Name,
                             EnableStreaming = true,
-                            BatchSize = 100000
+                            BatchSize = 100000,
+                            BulkCopyTimeout = 0
                         };
 
                         bulkCopy.WriteToServer(reader);
@@ -104,7 +106,7 @@ namespace SqlDbCopy
                         if (!Directory.Exists(Destination + "\\"))
                             Directory.CreateDirectory(Destination + "\\");
 
-                        using (FileStream outFile = File.Create(Destination + "\\" + table.Replace("[", "").Replace("]", "") + ".gz"))
+                        using (FileStream outFile = File.Create(Destination + "\\" + table.Name.Replace("[", "").Replace("]", "") + ".gz"))
                         using (GZipStream compress = new GZipStream(outFile, CompressionMode.Compress))
                         using (StreamWriter streamWriter = new StreamWriter(compress))
                         {
@@ -115,12 +117,11 @@ namespace SqlDbCopy
                             }
                             streamWriter.Close();
                         }
-
                     }
                     reader.Close();
                     connectionSource.Close();
                     stopwatch.Stop();
-                    Log.Write(string.Format("Finished copying {0} rows to {1} in {2}ms", rows, table, stopwatch.ElapsedMilliseconds));
+                    Log.Write(string.Format("Finished copying {0} rows to {1} in {2}ms", rows, table.Name, stopwatch.ElapsedMilliseconds));
                 }
                 catch (Exception ex)
                 {
@@ -136,10 +137,10 @@ namespace SqlDbCopy
         private void TruncateSource()
         {
             StringBuilder sb = new StringBuilder();
-            foreach (string t in Tables)
+            foreach (Table t in Tables)
             {
-                if (!String.IsNullOrEmpty(t))
-                    sb.AppendLine("TRUNCATE TABLE " + t);
+                if (!String.IsNullOrEmpty(t.Name))
+                    sb.AppendLine("TRUNCATE TABLE " + t.Name);
             }
 
             using (SqlConnection connection = new SqlConnection(Destination))
@@ -164,25 +165,23 @@ namespace SqlDbCopy
 
         private void GetTablesInternal(string filter)
         {
-            string sql = SYS_TABLES;
-
             if (!String.IsNullOrEmpty(filter))
             {
-                sql = SYS_TABLES + " LIKE '" + filter.Replace('*', '%') + "'";
+                Query = Query + " LIKE '" + filter.Replace('*', '%') + "'";
             }
 
-            List<string> tableList = new List<string>();
+            Tables = new List<Table>();
+
             SqlConnection source = new SqlConnection(Source);
             source.Open();
-            SqlCommand command = new SqlCommand(sql, source);
+            SqlCommand command = new SqlCommand(Query, source);
             SqlDataReader reader = command.ExecuteReader(CommandBehavior.CloseConnection);
             while (reader.Read())
             {
-                tableList.Add(reader.GetString(0).ToQuotedName());
+                Tables.Add(new Table { Name = reader.GetString(0).ToQuotedName(), Query = reader.GetString(1) });
             }
             reader.Close();
             source.Close();
-            Tables = tableList.ToArray();
         }
 
     }
